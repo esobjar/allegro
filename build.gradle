@@ -1,0 +1,117 @@
+configurations {
+    jaxb
+}
+
+buildscript {
+	ext {
+		springBootVersion = '1.4.0.RELEASE'
+	}
+	repositories {
+		mavenCentral()
+	}
+	dependencies {
+		classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+		classpath('se.transmode.gradle:gradle-docker:1.2')
+	}
+}
+group = 'springio'
+
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'spring-boot'
+apply plugin: 'docker'
+
+jar {
+	baseName = 'allegro'
+	version = '0.0.1-SNAPSHOT'
+}
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+	mavenCentral()
+}
+
+task genJaxb {
+    ext.sourcesDir = "${buildDir}/generated-sources/jaxb"
+    ext.classesDir = "${buildDir}/classes/jaxb"
+    ext.schema = "https://webapi.allegro.pl/service.php?wsdl"
+
+    outputs.dir classesDir
+
+    doLast() {
+        project.ant {
+            taskdef name: "xjc", classname: "com.sun.tools.xjc.XJCTask",
+                    classpath: configurations.jaxb.asPath
+            mkdir(dir: sourcesDir)
+            mkdir(dir: classesDir)
+
+            xjc(destdir: sourcesDir, schema: schema,
+                    package: "allegro.wsdl") {
+                arg(value: "-wsdl")
+                produces(dir: sourcesDir, includes: "**/*.java")
+            }
+
+            javac(destdir: classesDir, source: 1.8, target: 1.8, debug: true,
+                    debugLevel: "lines,vars,source",
+                    classpath: configurations.jaxb.asPath) {
+                src(path: sourcesDir)
+                include(name: "**/*.java")
+                include(name: "*.java")
+            }
+
+            copy(todir: classesDir) {
+                fileset(dir: sourcesDir, erroronmissingdir: false) {
+                    exclude(name: "**/*.java")
+                }
+            }
+        }
+    }
+}
+
+dependencies {
+	compile('org.springframework.boot:spring-boot-starter-data-jpa')
+	compile('org.springframework.boot:spring-boot-starter-web-services')
+	compile("org.springframework.boot:spring-boot-starter-websocket")
+	compile('org.springframework.hateoas:spring-hateoas')
+	compile('com.fasterxml.jackson.datatype:jackson-datatype-jsr310')
+	compile('org.hibernate:hibernate-java8')
+	compile('com.h2database:h2')
+	compile('com.google.guava:guava:19.0')
+	compile("org.springframework:spring-messaging")
+	compile("org.springframework:spring-jms")
+    compile("org.apache.activemq:activemq-broker")
+    compile("org.springframework.boot:spring-boot-starter-security")
+	testCompile('org.springframework.boot:spring-boot-starter-test')
+	compile(files(genJaxb.classesDir).builtBy(genJaxb))
+
+    jaxb "com.sun.xml.bind:jaxb-xjc:2.1.7"
+}
+
+jar {
+    baseName = 'allegro'
+    version =  '0.1.0'
+
+    from genJaxb.classesDir
+}
+
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '2.3'
+}
+
+task afterEclipseImport {
+    dependsOn genJaxb
+}
+
+task buildDocker(type: Docker, dependsOn: build) {
+  push = false
+  applicationName = jar.baseName
+  dockerfile = file('src/main/docker/Dockerfile')
+  doFirst {
+    copy {
+      from jar
+      into stageDir
+    }
+  }
+}
